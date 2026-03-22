@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build output (Netlify builds this itself)
+dist/
+
+# Environment variables — DO NOT COMMIT
+.env
+.env.local
+.env.production
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*

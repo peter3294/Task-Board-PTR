@@ -20,6 +20,34 @@ const QUOTES = [
     text: 'Be an Elephant, not a Hippopotamus — listen deeply, speak thoughtfully, and lead with care rather than dominance.',
     attribution: 'Lead Life Well',
   },
+  {
+    text: "It's not what you do, it's how well you communicate what you do.",
+    attribution: 'Beamer',
+  },
+  {
+    text: 'Individuals vary, but percentages remain constant.',
+    // Spoken by Sherlock Holmes in The Sign of the Four (1890)
+    attribution: 'Arthur Conan Doyle, The Sign of the Four',
+  },
+  {
+    text: 'Until you make the unconscious conscious, it will direct your life and you will call it fate.',
+    // Widely attributed to Jung; exact primary source unverified
+    attribution: 'attr. Carl Jung',
+  },
+  {
+    text: 'Why do we fall, Bruce? So we can learn to pick ourselves up.',
+    // Thomas Wayne to young Bruce — Batman Begins (2005), dir. Christopher Nolan
+    attribution: 'Thomas Wayne, Batman Begins',
+  },
+  {
+    text: 'Through discipline comes freedom.',
+    // Commonly attributed to Aristotle; exact primary source unverified
+    attribution: 'attr. Aristotle',
+  },
+  {
+    text: 'Lord, let me be smart enough to know how dumb I am, and give me the courage to carry on anyway.',
+    attribution: '',
+  },
 ];
 
 const SEPARATOR = '◆';
