@@ -1,4 +1,17 @@
 import { useState, useCallback, useEffect } from 'react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragOverlay,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
 import TaskRow from './TaskRow';
 import SearchModal from './SearchModal';
 import ArchiveView from './ArchiveView';
@@ -133,6 +146,35 @@ export default function TaskBoard({
   const handleAddTask    = useCallback(async () => { await addTask(null); }, [addTask]);
   const handleAddSubtask = useCallback(async (parentId) => { await addTask(parentId); }, [addTask]);
 
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleDragEnd = useCallback((event) => {
+    const { active, over } = event;
+    if (!active || !over || active.id === over.id) return;
+
+    // Find if these are root tasks or subtasks of the same parent
+    const activeTask = tasks.find(t => t.id === active.id);
+    const overTask   = tasks.find(t => t.id === over.id);
+    if (!activeTask || !overTask) return;
+
+    // Only allow reorder within same level (both roots, or both children of same parent)
+    const sameParent = activeTask.parentId === overTask.parentId;
+    if (!sameParent) return;
+
+    const siblings = tasks
+      .filter(t => t.parentId === activeTask.parentId)
+      .sort((a, b) => a.order - b.order);
+
+    const oldIdx = siblings.findIndex(t => t.id === active.id);
+    const newIdx = siblings.findIndex(t => t.id === over.id);
+    if (oldIdx === -1 || newIdx === -1) return;
+
+    const reordered = arrayMove(siblings, oldIdx, newIdx);
+    // Reassign order values with spacing
+    const updates = reordered.map((t, i) => ({ ...t, order: (i + 1) * 1000 }));
+    updates.forEach(t => updateTask(t.id, { order: t.order }));
+  }, [tasks, updateTask]);
+
   const filtered = applyFilters(tasks, filterStatus, filterDate);
   const tree = sortNodes(buildTree(filtered), sortKey, sortDir);
   const activeFilters = (filterStatus !== 'All' ? 1 : 0) + (filterDate !== 'All' ? 1 : 0);
@@ -144,7 +186,7 @@ export default function TaskBoard({
     <th
       onClick={() => handleSort(colKey)}
       className={`${thBase} cursor-pointer hover:text-av-teal transition-colors`}
-      style={{ position: 'sticky', top: 0, zIndex: 10 }}
+      style={{ position: 'sticky', top: 0, zIndex: 10, boxShadow: '0 1px 0 #C8E8E7' }}
     >
       <div className="flex items-center gap-1">
         {label}
@@ -263,50 +305,54 @@ export default function TaskBoard({
 
           {/* Scrollable table */}
           <div className="flex-1 overflow-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  <ColHeader colKey="item" label="Item" />
-                  <ColHeader colKey="actionDate" label="Action Date" />
-                  <ColHeader colKey="status" label="Status" />
-                  <ColHeader colKey="link" label="Link" />
-                  <th
-                    className={`${thBase} w-28`}
-                    style={{ position: 'sticky', top: 0, zIndex: 10 }}
-                  />
-                </tr>
-              </thead>
-              <tbody>
-                {loading && (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <table className="w-full" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
+                <thead>
                   <tr>
-                    <td colSpan={5} className="px-5 py-10 text-center text-sm text-gray-400">
-                      Loading tasks…
-                    </td>
+                    <ColHeader colKey="item" label="Item" />
+                    <ColHeader colKey="actionDate" label="Action Date" />
+                    <ColHeader colKey="status" label="Status" />
+                    <ColHeader colKey="link" label="Link" />
+                    <th
+                      className={`${thBase} w-32`}
+                      style={{ position: 'sticky', top: 0, zIndex: 10, boxShadow: '0 1px 0 #C8E8E7' }}
+                    />
                   </tr>
-                )}
+                </thead>
+                <tbody>
+                  {loading && (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-10 text-center text-sm text-gray-400">
+                        Loading tasks…
+                      </td>
+                    </tr>
+                  )}
 
-                {!loading && tree.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-5 py-10 text-center text-sm text-gray-400">
-                      {activeFilters > 0 ? 'No tasks match the current filters.' : 'No tasks yet. Add one below.'}
-                    </td>
-                  </tr>
-                )}
+                  {!loading && tree.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-10 text-center text-sm text-gray-400">
+                        {activeFilters > 0 ? 'No tasks match the current filters.' : 'No tasks yet. Add one below.'}
+                      </td>
+                    </tr>
+                  )}
 
-                {tree.map(node => (
-                  <TaskRow
-                    key={node.id}
-                    task={node}
-                    children={node.children || []}
-                    depth={0}
-                    onUpdate={updateTask}
-                    onArchive={archiveTask}
-                    onDelete={deleteTask}
-                    onAddSubtask={handleAddSubtask}
-                  />
-                ))}
-              </tbody>
-            </table>
+                  <SortableContext items={tree.map(n => n.id)} strategy={verticalListSortingStrategy}>
+                    {tree.map(node => (
+                      <TaskRow
+                        key={node.id}
+                        task={node}
+                        children={node.children || []}
+                        depth={0}
+                        onUpdate={updateTask}
+                        onArchive={archiveTask}
+                        onDelete={deleteTask}
+                        onAddSubtask={handleAddSubtask}
+                      />
+                    ))}
+                  </SortableContext>
+                </tbody>
+              </table>
+            </DndContext>
 
             {/* Add task */}
             <div className="px-3 py-2 border-t border-av-light-teal/30">
