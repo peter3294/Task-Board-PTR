@@ -1,8 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { useTasks } from './hooks/useTasks';
+import { ensureQuotesSheet, fetchQuotes } from './lib/sheetsApi';
 import LoginPage from './components/LoginPage';
 import TaskBoard from './components/TaskBoard';
+
+const SHEET_ID = import.meta.env.VITE_SHEET_ID;
 
 export default function App() {
   const { isAuthenticated, ready, signingIn, signIn, signOut, getToken } = useAuth();
@@ -16,14 +19,32 @@ export default function App() {
     updateTask,
     archiveTask,
     unarchiveTask,
+    deleteTask,
   } = useTasks(getToken);
 
-  // ⌘K shortcut for search (handled inside TaskBoard via keyboard listener)
+  const [quotes, setQuotes] = useState([]);
+
+  const loadQuotes = useCallback(async () => {
+    const token = getToken();
+    if (!token) return;
+    try {
+      await ensureQuotesSheet(token, SHEET_ID);
+      const data = await fetchQuotes(token, SHEET_ID);
+      if (data.length > 0) setQuotes(data);
+    } catch (_) {
+      // quotes are non-critical — fall back to hardcoded defaults in QuoteTicker
+    }
+  }, [getToken]);
+
+  useEffect(() => {
+    if (isAuthenticated) loadQuotes();
+  }, [isAuthenticated, loadQuotes]);
+
+  // ⌘K shortcut for search
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        // Dispatch to TaskBoard via a custom event
         window.dispatchEvent(new CustomEvent('open-search'));
       }
     };
@@ -46,6 +67,8 @@ export default function App() {
       updateTask={updateTask}
       archiveTask={archiveTask}
       unarchiveTask={unarchiveTask}
+      deleteTask={deleteTask}
+      quotes={quotes}
       getToken={getToken}
       onSignOut={signOut}
     />

@@ -25,8 +25,9 @@ function InlineInput({ value, onChange, onBlur, autoFocus, className = '' }) {
   );
 }
 
-export default function TaskRow({ task, children = [], depth = 0, onUpdate, onArchive, onAddSubtask }) {
-  const [expanded, setExpanded] = useState(false);
+export default function TaskRow({ task, children = [], depth = 0, onUpdate, onArchive, onDelete, onAddSubtask }) {
+  const [notesExpanded, setNotesExpanded] = useState(false);
+  const [childrenOpen, setChildrenOpen] = useState(false);
   const [editField, setEditField] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [hovered, setHovered] = useState(false);
@@ -41,6 +42,12 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
       onUpdate(task.id, { [editField]: editValue });
     }
     setEditField(null);
+  };
+
+  const handleDelete = () => {
+    if (window.confirm(`Permanently delete "${task.item || 'this task'}"? This cannot be undone.`)) {
+      onDelete(task.id);
+    }
   };
 
   const indentPx = depth * 20 + 12;
@@ -65,19 +72,36 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
         {/* Item */}
         <td className="py-1.5 pr-3" style={{ paddingLeft: `${indentPx}px` }}>
           <div className="flex items-center gap-1 min-w-0">
-            {/* Expand/collapse toggle */}
-            <button
-              onClick={() => setExpanded(v => !v)}
-              className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-gray-700"
-              title={expanded ? 'Collapse notes' : 'Expand notes'}
-            >
-              <svg
-                className={`w-3 h-3 transition-transform ${expanded ? 'rotate-90' : ''}`}
-                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+
+            {/* Subtask expand/collapse — only on parent rows with children */}
+            {depth === 0 && hasChildren ? (
+              <button
+                onClick={() => setChildrenOpen(v => !v)}
+                className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-gray-700"
+                title={childrenOpen ? 'Collapse subtasks' : 'Expand subtasks'}
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
+                <svg
+                  className={`w-3 h-3 transition-transform ${childrenOpen ? 'rotate-90' : ''}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            ) : (
+              /* Notes expand toggle (small chevron) for non-parent rows */
+              <button
+                onClick={() => setNotesExpanded(v => !v)}
+                className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-gray-300 hover:text-gray-600"
+                title={notesExpanded ? 'Collapse notes' : 'Expand notes'}
+              >
+                <svg
+                  className={`w-2.5 h-2.5 transition-transform ${notesExpanded ? 'rotate-90' : ''}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            )}
 
             {/* Sub-level connector */}
             {depth > 0 && (
@@ -102,7 +126,15 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
               </span>
             )}
 
-            {task.notes && !expanded && (
+            {/* Notes dot — on parent rows click opens notes */}
+            {task.notes && depth === 0 && (
+              <button
+                onClick={() => setNotesExpanded(v => !v)}
+                className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-blue-400 ml-1 hover:bg-blue-600 transition-colors"
+                title="View notes"
+              />
+            )}
+            {task.notes && depth > 0 && !notesExpanded && (
               <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-blue-400 ml-1" title="Has notes" />
             )}
           </div>
@@ -216,12 +248,19 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
             >
               Archive
             </button>
+            <button
+              onClick={handleDelete}
+              className="text-xs text-gray-300 hover:text-red-600 px-1.5 py-0.5 rounded hover:bg-red-50 transition-colors"
+              title="Delete permanently"
+            >
+              Delete
+            </button>
           </div>
         </td>
       </tr>
 
-      {/* Expanded notes */}
-      {expanded && (
+      {/* Expanded notes — shown when notes chevron is clicked */}
+      {notesExpanded && (
         <tr>
           <td colSpan={5} className="p-0">
             <TaskDetail task={task} onUpdate={onUpdate} />
@@ -229,8 +268,8 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
         </tr>
       )}
 
-      {/* Child tasks */}
-      {children.map(child => (
+      {/* Child tasks — shown only when parent chevron is expanded */}
+      {childrenOpen && children.map(child => (
         <TaskRow
           key={child.id}
           task={child}
@@ -238,6 +277,7 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
           depth={depth + 1}
           onUpdate={onUpdate}
           onArchive={onArchive}
+          onDelete={onDelete}
           onAddSubtask={onAddSubtask}
         />
       ))}

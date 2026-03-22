@@ -2,6 +2,19 @@ const BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 const SHEET = 'Tasks';
 const HEADERS = ['ID', 'ParentID', 'Item', 'ActionDate', 'Status', 'Link', 'Notes', 'Archived', 'Order', 'CreatedAt'];
 
+// Cached numeric sheet IDs (key = spreadsheetId)
+const _sheetIdCache = {};
+
+async function getNumericSheetId(token, spreadsheetId, sheetName) {
+  const cacheKey = `${spreadsheetId}:${sheetName}`;
+  if (_sheetIdCache[cacheKey] != null) return _sheetIdCache[cacheKey];
+  const data = await req(`${BASE}/${spreadsheetId}?fields=sheets.properties`, token);
+  const sheet = (data.sheets || []).find(s => s.properties.title === sheetName);
+  if (!sheet) throw new Error(`Sheet "${sheetName}" not found`);
+  _sheetIdCache[cacheKey] = sheet.properties.sheetId;
+  return sheet.properties.sheetId;
+}
+
 async function req(url, token, opts = {}) {
   const res = await fetch(url, {
     ...opts,
@@ -90,4 +103,65 @@ export async function updateTask(token, sheetId, task) {
     method: 'PUT',
     body: JSON.stringify({ values: [taskToRow(task)] }),
   });
+}
+
+export async function deleteRow(token, spreadsheetId, rowIndex) {
+  const numericId = await getNumericSheetId(token, spreadsheetId, SHEET);
+  await req(`${BASE}/${spreadsheetId}:batchUpdate`, token, {
+    method: 'POST',
+    body: JSON.stringify({
+      requests: [{
+        deleteDimension: {
+          range: {
+            sheetId: numericId,
+            dimension: 'ROWS',
+            startIndex: rowIndex - 1, // API is 0-based
+            endIndex: rowIndex,
+          },
+        },
+      }],
+    }),
+  });
+}
+
+// ── Quotes sheet ──────────────────────────────────────────────────────────────
+const QUOTES_SHEET = 'Quotes';
+const SEED_QUOTES = [
+  ['The Pareto Principle: 20% of your efforts drive 80% of your results — focus relentlessly on what moves the needle.', 'Pareto Principle'],
+  ['Worry is not the same as preparation.', 'Ping Yeh, StemoniX'],
+  ['The test of a first-rate intelligence is the ability to hold two opposed ideas in mind at the same time and still retain the ability to function.', 'F. Scott Fitzgerald'],
+  ['Be an Elephant, not a Hippopotamus — listen deeply, speak thoughtfully, and lead with care rather than dominance.', 'Lead Life Well'],
+  ["It's not what you do, it's how well you communicate what you do.", 'Beamer'],
+  ['Individuals vary, but percentages remain constant.', 'Arthur Conan Doyle, The Sign of the Four'],
+  ['Until you make the unconscious conscious, it will direct your life and you will call it fate.', 'attr. Carl Jung'],
+  ['Why do we fall, Bruce? So we can learn to pick ourselves up.', 'Thomas Wayne, Batman Begins'],
+  ['Through discipline comes freedom.', 'attr. Aristotle'],
+  ['Lord, let me be smart enough to know how dumb I am, and give me the courage to carry on anyway.', ''],
+];
+
+export async function ensureQuotesSheet(token, spreadsheetId) {
+  // Check if Quotes tab exists
+  const meta = await req(`${BASE}/${spreadsheetId}?fields=sheets.properties`, token);
+  const exists = (meta.sheets || []).some(s => s.properties.title === QUOTES_SHEET);
+  if (!exists) {
+    // Create the sheet
+    await req(`${BASE}/${spreadsheetId}:batchUpdate`, token, {
+      method: 'POST',
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: QUOTES_SHEET } } }] }),
+    });
+    // Write headers + seed data
+    const rows = [['Quote', 'Attribution'], ...SEED_QUOTES];
+    await req(`${BASE}/${spreadsheetId}/values/${QUOTES_SHEET}!A1:B${rows.length}?valueInputOption=RAW`, token, {
+      method: 'PUT',
+      body: JSON.stringify({ values: rows }),
+    });
+  }
+}
+
+export async function fetchQuotes(token, spreadsheetId) {
+  const url = `${BASE}/${spreadsheetId}/values/${QUOTES_SHEET}!A2:B`;
+  const data = await req(url, token);
+  return (data.values || [])
+    .filter(r => r[0]?.trim())
+    .map(r => ({ text: r[0] || '', attribution: r[1] || '' }));
 }

@@ -19,7 +19,9 @@ export async function fetchEvents(token, days = 14) {
     maxResults: '50',
   });
   const data = await req(`${BASE}/calendars/primary/events?${params}`, token);
-  return data.items || [];
+  return (data.items || []).filter(
+    ev => (ev.summary || '').trim().toLowerCase() !== 'hold'
+  );
 }
 
 export function formatEventTime(event) {

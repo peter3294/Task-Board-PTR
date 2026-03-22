@@ -19,6 +19,9 @@ const STATUS_ORDER = {
   'Done': 3,
 };
 
+const STATUS_FILTER_OPTIONS = ['All', 'Not Started', 'Working On It', 'Blocked', 'Done'];
+const DATE_FILTER_OPTIONS   = ['All', 'Overdue', 'Today', 'This Week', 'Next 14 Days'];
+
 function buildTree(tasks) {
   const map = {};
   tasks.forEach(t => { map[t.id] = { ...t, children: [] }; });
@@ -26,7 +29,7 @@ function buildTree(tasks) {
   tasks.forEach(t => {
     if (t.parentId && map[t.parentId]) {
       map[t.parentId].children.push(map[t.id]);
-    } else {
+    } else if (map[t.id]) {
       roots.push(map[t.id]);
     }
   });
@@ -48,6 +51,32 @@ function sortNodes(nodes, key, dir) {
   return [...nodes]
     .sort(compare)
     .map(n => ({ ...n, children: sortNodes(n.children || [], key, dir) }));
+}
+
+function applyFilters(tasks, filterStatus, filterDate) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const endOfToday = new Date(today); endOfToday.setHours(23, 59, 59, 999);
+  const endOfWeek  = new Date(today); endOfWeek.setDate(today.getDate() + 7);
+  const end14Days  = new Date(today); end14Days.setDate(today.getDate() + 14);
+
+  return tasks.filter(t => {
+    // Status filter
+    if (filterStatus !== 'All' && t.status !== filterStatus) return false;
+
+    // Date filter
+    if (filterDate !== 'All' && t.actionDate) {
+      const d = new Date(t.actionDate + 'T12:00:00');
+      if (filterDate === 'Overdue'     && d >= today)       return false;
+      if (filterDate === 'Today'       && (d < today || d > endOfToday)) return false;
+      if (filterDate === 'This Week'   && (d < today || d > endOfWeek))  return false;
+      if (filterDate === 'Next 14 Days'&& (d < today || d > end14Days))  return false;
+    } else if (filterDate !== 'All' && !t.actionDate) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 function SortIcon({ active, dir }) {
@@ -74,13 +103,17 @@ export default function TaskBoard({
   updateTask,
   archiveTask,
   unarchiveTask,
+  deleteTask,
+  quotes,
   getToken,
   onSignOut,
 }) {
-  const [sortKey, setSortKey] = useState('actionDate');
-  const [sortDir, setSortDir] = useState('asc');
-  const [showSearch, setShowSearch] = useState(false);
-  const [showArchive, setShowArchive] = useState(false);
+  const [sortKey, setSortKey]         = useState('actionDate');
+  const [sortDir, setSortDir]         = useState('asc');
+  const [filterStatus, setFilterStatus] = useState('All');
+  const [filterDate,   setFilterDate]   = useState('All');
+  const [showSearch,   setShowSearch]   = useState(false);
+  const [showArchive,  setShowArchive]  = useState(false);
 
   useEffect(() => {
     const handler = () => setShowSearch(true);
@@ -97,20 +130,21 @@ export default function TaskBoard({
     }
   };
 
-  const handleAddTask = useCallback(async () => {
-    await addTask(null);
-  }, [addTask]);
+  const handleAddTask    = useCallback(async () => { await addTask(null); }, [addTask]);
+  const handleAddSubtask = useCallback(async (parentId) => { await addTask(parentId); }, [addTask]);
 
-  const handleAddSubtask = useCallback(async (parentId) => {
-    await addTask(parentId);
-  }, [addTask]);
+  const filtered = applyFilters(tasks, filterStatus, filterDate);
+  const tree = sortNodes(buildTree(filtered), sortKey, sortDir);
+  const activeFilters = (filterStatus !== 'All' ? 1 : 0) + (filterDate !== 'All' ? 1 : 0);
 
-  const tree = sortNodes(buildTree(tasks), sortKey, sortDir);
+  // Shared th style for sticky headers
+  const thBase = 'px-3 py-2.5 text-left text-xs font-medium text-av-blue uppercase tracking-wide select-none whitespace-nowrap bg-av-bg-blue';
 
   const ColHeader = ({ colKey, label }) => (
     <th
       onClick={() => handleSort(colKey)}
-      className="px-3 py-2.5 text-left text-xs font-medium text-av-blue uppercase tracking-wide cursor-pointer hover:text-av-teal select-none whitespace-nowrap transition-colors"
+      className={`${thBase} cursor-pointer hover:text-av-teal transition-colors`}
+      style={{ position: 'sticky', top: 0, zIndex: 10 }}
     >
       <div className="flex items-center gap-1">
         {label}
@@ -121,7 +155,7 @@ export default function TaskBoard({
 
   return (
     <div className="min-h-screen bg-av-bg-gray flex flex-col">
-      {/* Top bar — AV Blue */}
+      {/* Top bar */}
       <header className="bg-av-blue px-5 py-3 flex items-center gap-3 flex-shrink-0 shadow-sm">
         <div className="flex items-center gap-2.5 mr-auto">
           <div className="w-6 h-6 bg-white/15 rounded flex items-center justify-center">
@@ -170,28 +204,76 @@ export default function TaskBoard({
         </button>
       </header>
 
-      {/* Motivational quote ticker — AV Navy */}
-      <QuoteTicker />
+      {/* Quote ticker */}
+      <QuoteTicker quotes={quotes} />
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Board area */}
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 flex flex-col overflow-hidden">
           {error && (
-            <div className="mx-4 mt-4 px-4 py-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
+            <div className="mx-4 mt-4 px-4 py-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700 flex-shrink-0">
               {error}
             </div>
           )}
 
-          <div className="px-0">
+          {/* Filter bar */}
+          <div className="flex items-center gap-3 px-3 py-2 bg-white border-b border-av-light-teal/30 flex-shrink-0">
+            <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">Filter</span>
+
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-gray-500">Status</label>
+              <select
+                value={filterStatus}
+                onChange={e => setFilterStatus(e.target.value)}
+                className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-av-teal"
+              >
+                {STATUS_FILTER_OPTIONS.map(o => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-gray-500">Date</label>
+              <select
+                value={filterDate}
+                onChange={e => setFilterDate(e.target.value)}
+                className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-av-teal"
+              >
+                {DATE_FILTER_OPTIONS.map(o => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </div>
+
+            {activeFilters > 0 && (
+              <button
+                onClick={() => { setFilterStatus('All'); setFilterDate('All'); }}
+                className="text-xs text-av-teal hover:text-av-blue transition-colors ml-1"
+              >
+                Clear filters
+              </button>
+            )}
+
+            <span className="ml-auto text-xs text-gray-400">
+              {filtered.length} task{filtered.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          {/* Scrollable table */}
+          <div className="flex-1 overflow-auto">
             <table className="w-full border-collapse">
-              <thead className="sticky top-0 z-10 bg-av-bg-blue border-b border-av-light-teal/40">
+              <thead>
                 <tr>
                   <ColHeader colKey="item" label="Item" />
                   <ColHeader colKey="actionDate" label="Action Date" />
                   <ColHeader colKey="status" label="Status" />
                   <ColHeader colKey="link" label="Link" />
-                  <th className="px-3 py-2.5 w-24" />
+                  <th
+                    className={`${thBase} w-28`}
+                    style={{ position: 'sticky', top: 0, zIndex: 10 }}
+                  />
                 </tr>
               </thead>
               <tbody>
@@ -206,7 +288,7 @@ export default function TaskBoard({
                 {!loading && tree.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-5 py-10 text-center text-sm text-gray-400">
-                      No tasks yet. Add one below.
+                      {activeFilters > 0 ? 'No tasks match the current filters.' : 'No tasks yet. Add one below.'}
                     </td>
                   </tr>
                 )}
@@ -219,6 +301,7 @@ export default function TaskBoard({
                     depth={0}
                     onUpdate={updateTask}
                     onArchive={archiveTask}
+                    onDelete={deleteTask}
                     onAddSubtask={handleAddSubtask}
                   />
                 ))}

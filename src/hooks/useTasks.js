@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ensureSheet, fetchTasks, appendTask, updateTask as apiUpdateTask } from '../lib/sheetsApi';
+import { ensureSheet, fetchTasks, appendTask, updateTask as apiUpdateTask, deleteRow } from '../lib/sheetsApi';
 
 const SHEET_ID = import.meta.env.VITE_SHEET_ID;
 
@@ -115,6 +115,33 @@ export function useTasks(getToken) {
     }
   }, [getToken, tasks]);
 
+  const deleteTask = useCallback(async (id) => {
+    // Collect id + all descendants
+    const allIds = new Set();
+    const collect = (taskId) => {
+      allIds.add(taskId);
+      tasks.filter(t => t.parentId === taskId).forEach(t => collect(t.id));
+    };
+    collect(id);
+    const token = getToken();
+    if (!token) return;
+    const toDelete = tasks.filter(t => allIds.has(t.id) && t.rowIndex);
+    // Optimistic removal
+    setTasks(prev => prev.filter(t => !allIds.has(t.id)));
+    try {
+      // Delete in reverse row order so indexes don't shift mid-delete
+      const sorted = [...toDelete].sort((a, b) => b.rowIndex - a.rowIndex);
+      for (const t of sorted) {
+        await deleteRow(token, SHEET_ID, t.rowIndex);
+      }
+      // Reload to resync row indexes after deletions
+      await load();
+    } catch (e) {
+      setError(e.message);
+      await load(); // resync on error too
+    }
+  }, [getToken, tasks, load]);
+
   const activeTasks = tasks.filter(t => !t.archived);
   const archivedTasks = tasks.filter(t => t.archived);
 
@@ -129,5 +156,6 @@ export function useTasks(getToken) {
     updateTask,
     archiveTask,
     unarchiveTask,
+    deleteTask,
   };
 }
