@@ -115,9 +115,9 @@ export async function batchUpdateOrders(token, sheetId, tasks) {
       values: [[String(t.order)]],
     }));
   if (!data.length) return;
-  await req(`${BASE}/${sheetId}/values:batchUpdate?valueInputOption=RAW`, token, {
+  await req(`${BASE}/${sheetId}/values:batchUpdate`, token, {
     method: 'POST',
-    body: JSON.stringify({ data }),
+    body: JSON.stringify({ valueInputOption: 'RAW', data }),
   });
 }
 

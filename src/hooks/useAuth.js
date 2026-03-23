@@ -28,7 +28,8 @@ export function useAuth() {
         setReady(true);
         // Attempt silent sign-in using stored email as hint (avoids showing
         // the account picker if the user previously granted consent)
-        silentTimeout = setTimeout(() => requestAccessToken('', getStoredEmail()), 200);
+        // 'none' = true silent auth (no popup). If it fails, user sees login page.
+        silentTimeout = setTimeout(() => requestAccessToken('none', getStoredEmail()), 200);
       }
     }, 100);
     return () => { clearInterval(poll); clearTimeout(silentTimeout); };

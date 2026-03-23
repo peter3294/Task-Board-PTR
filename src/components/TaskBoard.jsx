@@ -25,7 +25,7 @@ const STATUS_ORDER = {
 };
 
 const STATUS_OPTIONS = ['Not Started', 'Working On It', 'Blocked', 'Done'];
-const DATE_FILTER_OPTIONS = ['All', 'Overdue', 'Today', 'This Week', 'Next 14 Days'];
+const DATE_FILTER_OPTIONS = ['Overdue', 'Today', 'This Week', 'Next 14 Days'];
 
 const STATUS_STYLES = {
   'Not Started':   'bg-gray-100 text-gray-600',
@@ -59,6 +59,12 @@ function sortNodes(nodes, key, dir) {
       bv = STATUS_ORDER[bv] ?? 99;
       return dir === 'asc' ? av - bv : bv - av;
     }
+    // Tasks without an action date always sort to the bottom
+    if (key === 'actionDate') {
+      if (!av && !bv) return 0;
+      if (!av) return 1;   // a has no date → push down
+      if (!bv) return -1;  // b has no date → push down
+    }
     const cmp = String(av).localeCompare(String(bv));
     return dir === 'asc' ? cmp : -cmp;
   };
@@ -67,7 +73,17 @@ function sortNodes(nodes, key, dir) {
     .map(n => ({ ...n, children: sortNodes(n.children || [], key, dir) }));
 }
 
-function applyFilters(tasks, filterStatuses, filterDate) {
+function matchesDateFilter(t, filter, today, endOfToday, endOfWeek, end14Days) {
+  if (!t.actionDate) return false;
+  const d = new Date(t.actionDate + 'T12:00:00');
+  if (filter === 'Overdue')      return d < today;
+  if (filter === 'Today')        return d >= today && d <= endOfToday;
+  if (filter === 'This Week')    return d >= today && d <= endOfWeek;
+  if (filter === 'Next 14 Days') return d >= today && d <= end14Days;
+  return false;
+}
+
+function applyFilters(tasks, filterStatuses, filterDates) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const endOfToday = new Date(today); endOfToday.setHours(23, 59, 59, 999);
@@ -75,15 +91,12 @@ function applyFilters(tasks, filterStatuses, filterDate) {
   const end14Days  = new Date(today); end14Days.setDate(today.getDate() + 14);
 
   return tasks.filter(t => {
+    // Status filter (multi-select, empty = all)
     if (filterStatuses.length > 0 && !filterStatuses.includes(t.status)) return false;
-    if (filterDate !== 'All' && t.actionDate) {
-      const d = new Date(t.actionDate + 'T12:00:00');
-      if (filterDate === 'Overdue'      && d >= today)       return false;
-      if (filterDate === 'Today'        && (d < today || d > endOfToday)) return false;
-      if (filterDate === 'This Week'    && (d < today || d > endOfWeek))  return false;
-      if (filterDate === 'Next 14 Days' && (d < today || d > end14Days))  return false;
-    } else if (filterDate !== 'All' && !t.actionDate) {
-      return false;
+    // Date filter (multi-select OR logic, empty = all)
+    if (filterDates.length > 0) {
+      const matchesAny = filterDates.some(f => matchesDateFilter(t, f, today, endOfToday, endOfWeek, end14Days));
+      if (!matchesAny) return false;
     }
     return true;
   });
@@ -106,7 +119,7 @@ function SortIcon({ active, dir }) {
   );
 }
 
-function StatusMultiFilter({ selected, onChange }) {
+function MultiFilter({ selected, onChange, options, renderLabel }) {
   const [open, setOpen] = useState(false);
   const ref = useRef();
 
@@ -143,7 +156,7 @@ function StatusMultiFilter({ selected, onChange }) {
 
       {open && (
         <div className="absolute top-full mt-1 left-0 bg-white border border-gray-200 rounded-md shadow-lg z-30 min-w-[175px]">
-          {STATUS_OPTIONS.map(opt => (
+          {options.map(opt => (
             <label
               key={opt}
               className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-gray-50 cursor-pointer"
@@ -154,9 +167,9 @@ function StatusMultiFilter({ selected, onChange }) {
                 onChange={() => toggle(opt)}
                 className="rounded border-gray-300 text-av-teal focus:ring-av-teal"
               />
-              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATUS_STYLES[opt]}`}>
-                {opt}
-              </span>
+              {renderLabel ? renderLabel(opt) : (
+                <span className="text-xs">{opt}</span>
+              )}
             </label>
           ))}
           {selected.length > 0 && (
@@ -195,7 +208,7 @@ export default function TaskBoard({
   const [sortKey, setSortKey]           = useState('actionDate');
   const [sortDir, setSortDir]           = useState('asc');
   const [filterStatuses, setFilterStatuses] = useState([]);
-  const [filterDate,     setFilterDate]     = useState('All');
+  const [filterDates,    setFilterDates]    = useState([]);
   const [showSearch,  setShowSearch]  = useState(false);
   const [showArchive, setShowArchive] = useState(false);
 
@@ -241,9 +254,9 @@ export default function TaskBoard({
     reorderTasks(reordered);
   }, [tasks, reorderTasks]);
 
-  const filtered = applyFilters(tasks, filterStatuses, filterDate);
+  const filtered = applyFilters(tasks, filterStatuses, filterDates);
   const tree = sortNodes(buildTree(filtered), sortKey, sortDir);
-  const activeFilters = filterStatuses.length + (filterDate !== 'All' ? 1 : 0);
+  const activeFilters = filterStatuses.length + filterDates.length;
 
   const thBase = 'px-3 py-2.5 text-left text-xs font-medium text-av-blue uppercase tracking-wide select-none whitespace-nowrap bg-av-bg-blue';
 
@@ -349,25 +362,28 @@ export default function TaskBoard({
 
             <div className="flex items-center gap-1.5">
               <label className="text-xs text-gray-500">Status</label>
-              <StatusMultiFilter selected={filterStatuses} onChange={setFilterStatuses} />
+              <MultiFilter
+                selected={filterStatuses}
+                onChange={setFilterStatuses}
+                options={STATUS_OPTIONS}
+                renderLabel={opt => (
+                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATUS_STYLES[opt]}`}>{opt}</span>
+                )}
+              />
             </div>
 
             <div className="flex items-center gap-1.5">
               <label className="text-xs text-gray-500">Date</label>
-              <select
-                value={filterDate}
-                onChange={e => setFilterDate(e.target.value)}
-                className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-av-teal"
-              >
-                {DATE_FILTER_OPTIONS.map(o => (
-                  <option key={o} value={o}>{o}</option>
-                ))}
-              </select>
+              <MultiFilter
+                selected={filterDates}
+                onChange={setFilterDates}
+                options={DATE_FILTER_OPTIONS}
+              />
             </div>
 
             {activeFilters > 0 && (
               <button
-                onClick={() => { setFilterStatuses([]); setFilterDate('All'); }}
+                onClick={() => { setFilterStatuses([]); setFilterDates([]); }}
                 className="text-xs text-av-teal hover:text-av-blue transition-colors ml-1"
               >
                 Clear filters
@@ -435,6 +451,7 @@ export default function TaskBoard({
                         onArchive={archiveTask}
                         onDelete={deleteTask}
                         onAddSubtask={handleAddSubtask}
+                        onReorder={reorderTasks}
                       />
                     ))}
                   </SortableContext>

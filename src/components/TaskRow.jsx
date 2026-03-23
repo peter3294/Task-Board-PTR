@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
-import { useSortable } from '@dnd-kit/sortable';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useSortable, SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import TaskDetail from './TaskDetail';
 
 const STATUS_OPTIONS = ['Not Started', 'Working On It', 'Blocked', 'Done'];
@@ -46,7 +46,32 @@ function DragHandle({ listeners, attributes }) {
   );
 }
 
-export default function TaskRow({ task, children = [], depth = 0, onUpdate, onArchive, onDelete, onAddSubtask, onReorderChildren }) {
+// Isolated DndContext for subtask reordering — prevents drag events leaking
+// into the parent-level DndContext that handles root task sorting.
+function SubtaskDndWrapper({ items, onReorder, children }) {
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleDragEnd = useCallback((event) => {
+    const { active, over } = event;
+    if (!active || !over || active.id === over.id) return;
+    const sorted = [...items].sort((a, b) => a.order - b.order);
+    const oldIdx = sorted.findIndex(c => c.id === active.id);
+    const newIdx = sorted.findIndex(c => c.id === over.id);
+    if (oldIdx === -1 || newIdx === -1) return;
+    const reordered = arrayMove(sorted, oldIdx, newIdx);
+    onReorder?.(reordered);
+  }, [items, onReorder]);
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={items.map(c => c.id)} strategy={verticalListSortingStrategy}>
+        {children}
+      </SortableContext>
+    </DndContext>
+  );
+}
+
+export default function TaskRow({ task, children = [], depth = 0, onUpdate, onArchive, onDelete, onAddSubtask, onReorder }) {
   const [notesExpanded, setNotesExpanded]   = useState(false);
   const [childrenOpen, setChildrenOpen]     = useState(false);
   const [editField, setEditField]           = useState(null);
@@ -165,8 +190,13 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
         <td className="py-1.5 px-3">
           {editField === 'status' ? (
             <select value={editValue}
-              onChange={e => { setEditValue(e.target.value); commitEdit(); }}
-              onBlur={commitEdit} autoFocus
+              onChange={e => {
+                // Call onUpdate directly — React batches setEditValue so commitEdit
+                // would read the stale value and silently skip the save.
+                onUpdate(task.id, { status: e.target.value });
+                setEditField(null);
+              }}
+              onBlur={() => setEditField(null)} autoFocus
               className="border border-blue-300 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
             >
               {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -241,9 +271,9 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
         </tr>
       )}
 
-      {/* Subtasks — sortable within parent */}
+      {/* Subtasks — own DndContext so drags don't conflict with root task sorting */}
       {childrenOpen && children.length > 0 && (
-        <SortableContext items={children.map(c => c.id)} strategy={verticalListSortingStrategy}>
+        <SubtaskDndWrapper items={children} onReorder={onReorder}>
           {children.map(child => (
             <TaskRow
               key={child.id}
@@ -254,9 +284,10 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
               onArchive={onArchive}
               onDelete={onDelete}
               onAddSubtask={onAddSubtask}
+              onReorder={onReorder}
             />
           ))}
-        </SortableContext>
+        </SubtaskDndWrapper>
       )}
     </>
   );
