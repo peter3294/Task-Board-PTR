@@ -19,8 +19,9 @@ export async function fetchEvents(token, days = 14) {
     maxResults: '50',
   });
   const data = await req(`${BASE}/calendars/primary/events?${params}`, token);
+  const HIDDEN_TITLES = ['hold', 'block'];
   return (data.items || []).filter(
-    ev => (ev.summary || '').trim().toLowerCase() !== 'hold'
+    ev => !HIDDEN_TITLES.includes((ev.summary || '').trim().toLowerCase())
   );
 }
 

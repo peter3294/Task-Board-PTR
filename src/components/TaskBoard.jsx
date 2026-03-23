@@ -1,11 +1,10 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   DndContext,
   closestCenter,
   PointerSensor,
   useSensor,
   useSensors,
-  DragOverlay,
 } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -18,13 +17,6 @@ import ArchiveView from './ArchiveView';
 import CalendarPanel from './CalendarPanel';
 import QuoteTicker from './QuoteTicker';
 
-const SORT_KEYS = {
-  item: 'item',
-  actionDate: 'actionDate',
-  status: 'status',
-  link: 'link',
-};
-
 const STATUS_ORDER = {
   'Not Started': 0,
   'Working On It': 1,
@@ -32,8 +24,17 @@ const STATUS_ORDER = {
   'Done': 3,
 };
 
-const STATUS_FILTER_OPTIONS = ['All', 'Not Started', 'Working On It', 'Blocked', 'Done'];
-const DATE_FILTER_OPTIONS   = ['All', 'Overdue', 'Today', 'This Week', 'Next 14 Days'];
+const STATUS_OPTIONS = ['Not Started', 'Working On It', 'Blocked', 'Done'];
+const DATE_FILTER_OPTIONS = ['All', 'Overdue', 'Today', 'This Week', 'Next 14 Days'];
+
+const STATUS_STYLES = {
+  'Not Started':   'bg-gray-100 text-gray-600',
+  'Working On It': 'bg-blue-100 text-blue-700',
+  'Blocked':       'bg-orange-100 text-orange-700',
+  'Done':          'bg-green-100 text-green-700',
+};
+
+// ── helpers ──────────────────────────────────────────────────────────────────
 
 function buildTree(tasks) {
   const map = {};
@@ -66,7 +67,7 @@ function sortNodes(nodes, key, dir) {
     .map(n => ({ ...n, children: sortNodes(n.children || [], key, dir) }));
 }
 
-function applyFilters(tasks, filterStatus, filterDate) {
+function applyFilters(tasks, filterStatuses, filterDate) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const endOfToday = new Date(today); endOfToday.setHours(23, 59, 59, 999);
@@ -74,28 +75,27 @@ function applyFilters(tasks, filterStatus, filterDate) {
   const end14Days  = new Date(today); end14Days.setDate(today.getDate() + 14);
 
   return tasks.filter(t => {
-    // Status filter
-    if (filterStatus !== 'All' && t.status !== filterStatus) return false;
-
-    // Date filter
+    if (filterStatuses.length > 0 && !filterStatuses.includes(t.status)) return false;
     if (filterDate !== 'All' && t.actionDate) {
       const d = new Date(t.actionDate + 'T12:00:00');
-      if (filterDate === 'Overdue'     && d >= today)       return false;
-      if (filterDate === 'Today'       && (d < today || d > endOfToday)) return false;
-      if (filterDate === 'This Week'   && (d < today || d > endOfWeek))  return false;
-      if (filterDate === 'Next 14 Days'&& (d < today || d > end14Days))  return false;
+      if (filterDate === 'Overdue'      && d >= today)       return false;
+      if (filterDate === 'Today'        && (d < today || d > endOfToday)) return false;
+      if (filterDate === 'This Week'    && (d < today || d > endOfWeek))  return false;
+      if (filterDate === 'Next 14 Days' && (d < today || d > end14Days))  return false;
     } else if (filterDate !== 'All' && !t.actionDate) {
       return false;
     }
-
     return true;
   });
 }
 
+// ── sub-components ────────────────────────────────────────────────────────────
+
 function SortIcon({ active, dir }) {
   if (!active) return (
     <svg className="w-3 h-3 text-av-teal/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+        d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
     </svg>
   );
   return (
@@ -106,6 +106,75 @@ function SortIcon({ active, dir }) {
   );
 }
 
+function StatusMultiFilter({ selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const toggle = (opt) => {
+    const next = selected.includes(opt)
+      ? selected.filter(s => s !== opt)
+      : [...selected, opt];
+    onChange(next);
+  };
+
+  const label = selected.length === 0 ? 'All'
+    : selected.length === 1 ? selected[0]
+    : `${selected.length} selected`;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1 text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-700 hover:border-gray-300 focus:outline-none focus:ring-1 focus:ring-av-teal"
+      >
+        <span>{label}</span>
+        <svg className={`w-3 h-3 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute top-full mt-1 left-0 bg-white border border-gray-200 rounded-md shadow-lg z-30 min-w-[175px]">
+          {STATUS_OPTIONS.map(opt => (
+            <label
+              key={opt}
+              className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-gray-50 cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(opt)}
+                onChange={() => toggle(opt)}
+                className="rounded border-gray-300 text-av-teal focus:ring-av-teal"
+              />
+              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATUS_STYLES[opt]}`}>
+                {opt}
+              </span>
+            </label>
+          ))}
+          {selected.length > 0 && (
+            <button
+              onClick={() => { onChange([]); setOpen(false); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-av-teal hover:bg-gray-50 border-t border-gray-100"
+            >
+              Clear selection
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── main component ────────────────────────────────────────────────────────────
+
 export default function TaskBoard({
   tasks,
   archivedTasks,
@@ -114,19 +183,21 @@ export default function TaskBoard({
   error,
   addTask,
   updateTask,
+  reorderTasks,
   archiveTask,
   unarchiveTask,
   deleteTask,
   quotes,
   getToken,
+  userInfo,
   onSignOut,
 }) {
-  const [sortKey, setSortKey]         = useState('actionDate');
-  const [sortDir, setSortDir]         = useState('asc');
-  const [filterStatus, setFilterStatus] = useState('All');
-  const [filterDate,   setFilterDate]   = useState('All');
-  const [showSearch,   setShowSearch]   = useState(false);
-  const [showArchive,  setShowArchive]  = useState(false);
+  const [sortKey, setSortKey]           = useState('actionDate');
+  const [sortDir, setSortDir]           = useState('asc');
+  const [filterStatuses, setFilterStatuses] = useState([]);
+  const [filterDate,     setFilterDate]     = useState('All');
+  const [showSearch,  setShowSearch]  = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
 
   useEffect(() => {
     const handler = () => setShowSearch(true);
@@ -152,14 +223,10 @@ export default function TaskBoard({
     const { active, over } = event;
     if (!active || !over || active.id === over.id) return;
 
-    // Find if these are root tasks or subtasks of the same parent
     const activeTask = tasks.find(t => t.id === active.id);
     const overTask   = tasks.find(t => t.id === over.id);
     if (!activeTask || !overTask) return;
-
-    // Only allow reorder within same level (both roots, or both children of same parent)
-    const sameParent = activeTask.parentId === overTask.parentId;
-    if (!sameParent) return;
+    if (activeTask.parentId !== overTask.parentId) return;
 
     const siblings = tasks
       .filter(t => t.parentId === activeTask.parentId)
@@ -170,16 +237,14 @@ export default function TaskBoard({
     if (oldIdx === -1 || newIdx === -1) return;
 
     const reordered = arrayMove(siblings, oldIdx, newIdx);
-    // Reassign order values with spacing
-    const updates = reordered.map((t, i) => ({ ...t, order: (i + 1) * 1000 }));
-    updates.forEach(t => updateTask(t.id, { order: t.order }));
-  }, [tasks, updateTask]);
+    // Single batch call — avoids Google Sheets write-quota errors
+    reorderTasks(reordered);
+  }, [tasks, reorderTasks]);
 
-  const filtered = applyFilters(tasks, filterStatus, filterDate);
+  const filtered = applyFilters(tasks, filterStatuses, filterDate);
   const tree = sortNodes(buildTree(filtered), sortKey, sortDir);
-  const activeFilters = (filterStatus !== 'All' ? 1 : 0) + (filterDate !== 'All' ? 1 : 0);
+  const activeFilters = filterStatuses.length + (filterDate !== 'All' ? 1 : 0);
 
-  // Shared th style for sticky headers
   const thBase = 'px-3 py-2.5 text-left text-xs font-medium text-av-blue uppercase tracking-wide select-none whitespace-nowrap bg-av-bg-blue';
 
   const ColHeader = ({ colKey, label }) => (
@@ -196,7 +261,9 @@ export default function TaskBoard({
   );
 
   return (
-    <div className="min-h-screen bg-av-bg-gray flex flex-col">
+    // h-screen + overflow-hidden forces the inner div to scroll, making sticky headers work
+    <div className="h-screen bg-av-bg-gray flex flex-col overflow-hidden">
+
       {/* Top bar */}
       <header className="bg-av-blue px-5 py-3 flex items-center gap-3 flex-shrink-0 shadow-sm">
         <div className="flex items-center gap-2.5 mr-auto">
@@ -237,13 +304,29 @@ export default function TaskBoard({
           )}
         </button>
 
-        <button
-          onClick={onSignOut}
-          className="text-sm text-white/50 hover:text-white/90 transition-colors px-2"
-          title="Sign out"
-        >
-          Sign out
-        </button>
+        {/* User avatar + name */}
+        <div className="flex items-center gap-2 pl-2 border-l border-white/20">
+          {userInfo?.picture && (
+            <img
+              src={userInfo.picture}
+              alt={userInfo.name || 'User'}
+              className="w-7 h-7 rounded-full border-2 border-white/30"
+              referrerPolicy="no-referrer"
+            />
+          )}
+          {userInfo?.name && (
+            <span className="text-sm text-white/80 max-w-[120px] truncate hidden sm:block">
+              {userInfo.name}
+            </span>
+          )}
+          <button
+            onClick={onSignOut}
+            className="text-xs text-white/40 hover:text-white/80 transition-colors"
+            title="Sign out"
+          >
+            Sign out
+          </button>
+        </div>
       </header>
 
       {/* Quote ticker */}
@@ -251,6 +334,7 @@ export default function TaskBoard({
 
       {/* Main content */}
       <div className="flex flex-1 min-h-0">
+
         {/* Board area */}
         <div className="flex-1 flex flex-col min-h-0">
           {error && (
@@ -265,15 +349,7 @@ export default function TaskBoard({
 
             <div className="flex items-center gap-1.5">
               <label className="text-xs text-gray-500">Status</label>
-              <select
-                value={filterStatus}
-                onChange={e => setFilterStatus(e.target.value)}
-                className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-av-teal"
-              >
-                {STATUS_FILTER_OPTIONS.map(o => (
-                  <option key={o} value={o}>{o}</option>
-                ))}
-              </select>
+              <StatusMultiFilter selected={filterStatuses} onChange={setFilterStatuses} />
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -291,19 +367,31 @@ export default function TaskBoard({
 
             {activeFilters > 0 && (
               <button
-                onClick={() => { setFilterStatus('All'); setFilterDate('All'); }}
+                onClick={() => { setFilterStatuses([]); setFilterDate('All'); }}
                 className="text-xs text-av-teal hover:text-av-blue transition-colors ml-1"
               >
                 Clear filters
               </button>
             )}
 
-            <span className="ml-auto text-xs text-gray-400">
+            {/* Add task button lives in the filter bar — always visible */}
+            <button
+              onClick={handleAddTask}
+              disabled={loading}
+              className="ml-auto flex items-center gap-1.5 text-sm text-av-teal/70 hover:text-av-teal border border-av-teal/30 hover:border-av-teal/60 py-1 px-3 rounded transition-colors disabled:opacity-40"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Add task
+            </button>
+
+            <span className="text-xs text-gray-400">
               {filtered.length} task{filtered.length !== 1 ? 's' : ''}
             </span>
           </div>
 
-          {/* Scrollable table */}
+          {/* Scrollable table — overflow-auto here is the scroll container for sticky headers */}
           <div className="flex-1 overflow-auto">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
               <table className="w-full" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
@@ -331,7 +419,7 @@ export default function TaskBoard({
                   {!loading && tree.length === 0 && (
                     <tr>
                       <td colSpan={5} className="px-5 py-10 text-center text-sm text-gray-400">
-                        {activeFilters > 0 ? 'No tasks match the current filters.' : 'No tasks yet. Add one below.'}
+                        {activeFilters > 0 ? 'No tasks match the current filters.' : 'No tasks yet — click Add task to get started.'}
                       </td>
                     </tr>
                   )}
@@ -353,20 +441,6 @@ export default function TaskBoard({
                 </tbody>
               </table>
             </DndContext>
-
-            {/* Add task */}
-            <div className="px-3 py-2 border-t border-av-light-teal/30">
-              <button
-                onClick={handleAddTask}
-                disabled={loading}
-                className="flex items-center gap-1.5 text-sm text-av-teal/60 hover:text-av-teal py-1.5 px-2 rounded hover:bg-av-bg-teal transition-colors disabled:opacity-40"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                Add task
-              </button>
-            </div>
           </div>
         </div>
 

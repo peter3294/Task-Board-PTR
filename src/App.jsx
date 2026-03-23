@@ -8,7 +8,7 @@ import TaskBoard from './components/TaskBoard';
 const SHEET_ID = import.meta.env.VITE_SHEET_ID;
 
 export default function App() {
-  const { isAuthenticated, ready, signingIn, signIn, signOut, getToken } = useAuth();
+  const { isAuthenticated, ready, signingIn, signIn, signOut, getToken, userInfo } = useAuth();
   const {
     tasks,
     archivedTasks,
@@ -17,6 +17,7 @@ export default function App() {
     error,
     addTask,
     updateTask,
+    reorderTasks,
     archiveTask,
     unarchiveTask,
     deleteTask,
@@ -65,11 +66,13 @@ export default function App() {
       error={error}
       addTask={addTask}
       updateTask={updateTask}
+      reorderTasks={reorderTasks}
       archiveTask={archiveTask}
       unarchiveTask={unarchiveTask}
       deleteTask={deleteTask}
       quotes={quotes}
       getToken={getToken}
+      userInfo={userInfo}
       onSignOut={signOut}
     />
   );

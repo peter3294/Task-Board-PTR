@@ -26,7 +26,7 @@ export default function RichTextEditor({ content, onChange, editable = true }) {
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2] } }),
       Underline,
-      Link.configure({ openOnClick: false, HTMLAttributes: { rel: 'noopener noreferrer' } }),
+      Link.configure({ openOnClick: true, HTMLAttributes: { rel: 'noopener noreferrer', target: '_blank' } }),
     ],
     content,
     editable,

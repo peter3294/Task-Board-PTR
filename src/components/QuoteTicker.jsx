@@ -50,7 +50,7 @@ export default function QuoteTicker({ quotes = [] }) {
   return (
     <div
       className="bg-av-navy border-b border-white/10 flex-shrink-0 flex items-center px-5"
-      style={{ height: '34px' }}
+      style={{ height: '52px' }}
       aria-label="Motivational quote"
     >
       <div
@@ -62,13 +62,13 @@ export default function QuoteTicker({ quotes = [] }) {
           overflow: 'hidden',
           textOverflow: 'ellipsis',
         }}
-        className="flex items-baseline gap-2 min-w-0 w-full"
+        className="flex items-baseline gap-3 min-w-0 w-full"
       >
-        <span className="text-av-gold font-medium text-sm truncate">
+        <span className="text-av-gold font-medium text-xl truncate">
           {current.text}
         </span>
         {current.attribution && (
-          <span className="text-white/45 text-xs italic flex-shrink-0">
+          <span className="text-white/45 text-sm italic flex-shrink-0">
             — {current.attribution}
           </span>
         )}

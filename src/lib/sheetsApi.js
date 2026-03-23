@@ -105,6 +105,22 @@ export async function updateTask(token, sheetId, task) {
   });
 }
 
+// Batch-update only the Order column (I) for multiple rows in one API call.
+// This avoids hitting the 60-writes-per-minute quota on drag-and-drop reorders.
+export async function batchUpdateOrders(token, sheetId, tasks) {
+  const data = tasks
+    .filter(t => t.rowIndex)
+    .map(t => ({
+      range: `${SHEET}!I${t.rowIndex}`,
+      values: [[String(t.order)]],
+    }));
+  if (!data.length) return;
+  await req(`${BASE}/${sheetId}/values:batchUpdate?valueInputOption=RAW`, token, {
+    method: 'POST',
+    body: JSON.stringify({ data }),
+  });
+}
+
 export async function deleteRow(token, spreadsheetId, rowIndex) {
   const numericId = await getNumericSheetId(token, spreadsheetId, SHEET);
   await req(`${BASE}/${spreadsheetId}:batchUpdate`, token, {

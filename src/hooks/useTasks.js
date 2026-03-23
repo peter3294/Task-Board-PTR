@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ensureSheet, fetchTasks, appendTask, updateTask as apiUpdateTask, deleteRow } from '../lib/sheetsApi';
+import { ensureSheet, fetchTasks, appendTask, updateTask as apiUpdateTask, deleteRow, batchUpdateOrders } from '../lib/sheetsApi';
 
 const SHEET_ID = import.meta.env.VITE_SHEET_ID;
 
@@ -142,6 +142,25 @@ export function useTasks(getToken) {
     }
   }, [getToken, tasks, load]);
 
+  // Reorder a group of siblings with a single batch API call to avoid quota errors.
+  // orderedTasks = array of full task objects in their new order (same-level siblings).
+  const reorderTasks = useCallback(async (orderedTasks) => {
+    const token = getToken();
+    if (!token) return;
+    const updates = orderedTasks.map((t, i) => ({ ...t, order: (i + 1) * 1000 }));
+    // Optimistic update
+    setTasks(prev => prev.map(t => {
+      const u = updates.find(u => u.id === t.id);
+      return u ? { ...t, order: u.order } : t;
+    }));
+    try {
+      await batchUpdateOrders(token, SHEET_ID, updates);
+    } catch (e) {
+      setError(e.message);
+      await load();
+    }
+  }, [getToken, load]);
+
   const activeTasks = tasks.filter(t => !t.archived);
   const archivedTasks = tasks.filter(t => t.archived);
 
@@ -154,6 +173,7 @@ export function useTasks(getToken) {
     reload: load,
     addTask,
     updateTask,
+    reorderTasks,
     archiveTask,
     unarchiveTask,
     deleteTask,
