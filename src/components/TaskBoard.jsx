@@ -51,6 +51,13 @@ function buildTree(tasks) {
 }
 
 function sortNodes(nodes, key, dir) {
+  // When no column sort is active (key is null), use the manual drag order
+  if (!key) {
+    return [...nodes]
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map(n => ({ ...n, children: sortNodes(n.children || [], null, 'asc') }));
+  }
+
   const compare = (a, b) => {
     let av = a[key] || '';
     let bv = b[key] || '';
@@ -205,7 +212,8 @@ export default function TaskBoard({
   userInfo,
   onSignOut,
 }) {
-  const [sortKey, setSortKey]           = useState('actionDate');
+  // null = manual order (drag-sortable); clicking a header cycles asc → desc → null
+  const [sortKey, setSortKey]           = useState(null);
   const [sortDir, setSortDir]           = useState('asc');
   const [filterStatuses, setFilterStatuses] = useState([]);
   const [filterDates,    setFilterDates]    = useState([]);
@@ -220,7 +228,13 @@ export default function TaskBoard({
 
   const handleSort = (key) => {
     if (sortKey === key) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+      if (sortDir === 'asc') {
+        setSortDir('desc');
+      } else {
+        // Third click — clear sort back to manual drag order
+        setSortKey(null);
+        setSortDir('asc');
+      }
     } else {
       setSortKey(key);
       setSortDir('asc');

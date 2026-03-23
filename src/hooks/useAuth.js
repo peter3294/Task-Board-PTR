@@ -4,35 +4,67 @@ import {
   fetchUserInfo, getStoredEmail, storeEmail, clearStoredEmail,
 } from '../lib/googleAuth';
 
+const TOKEN_KEY = 'ptr_access_token';
+const EXPIRY_KEY = 'ptr_token_expiry';
+const USER_KEY = 'ptr_user_info';
+
+function loadStoredSession() {
+  try {
+    const token = localStorage.getItem(TOKEN_KEY);
+    const expiry = parseInt(localStorage.getItem(EXPIRY_KEY) || '0', 10);
+    const user = JSON.parse(localStorage.getItem(USER_KEY) || 'null');
+    if (token && Date.now() < expiry) return { token, expiry, user };
+  } catch { /* corrupt data — ignore */ }
+  return null;
+}
+
+function storeSession(token, expiresAt, user) {
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(EXPIRY_KEY, String(expiresAt));
+  if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+function clearSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(EXPIRY_KEY);
+  localStorage.removeItem(USER_KEY);
+  clearStoredEmail();
+}
+
 export function useAuth() {
-  const [accessToken, setAccessToken] = useState(null);
-  const [expiresAt, setExpiresAt]     = useState(null);
+  // Restore session from localStorage on first load
+  const stored = loadStoredSession();
+  const [accessToken, setAccessToken] = useState(stored?.token || null);
+  const [expiresAt, setExpiresAt]     = useState(stored?.expiry || null);
   const [ready, setReady]             = useState(false);
   const [signingIn, setSigningIn]     = useState(false);
-  const [userInfo, setUserInfo]       = useState(null);
+  const [userInfo, setUserInfo]       = useState(stored?.user || null);
 
   useEffect(() => {
-    let silentTimeout;
     const poll = setInterval(() => {
       if (window.google?.accounts?.oauth2) {
         clearInterval(poll);
         initTokenClient(async (response) => {
           setSigningIn(false);
           if (response.error) return;
-          setAccessToken(response.access_token);
-          setExpiresAt(Date.now() + (response.expires_in - 60) * 1000);
-          // Fetch user profile for display + store email for future silent sign-in
-          const info = await fetchUserInfo(response.access_token);
-          if (info) { setUserInfo(info); storeEmail(info.email); }
+          const token = response.access_token;
+          const expiry = Date.now() + (response.expires_in - 60) * 1000;
+          setAccessToken(token);
+          setExpiresAt(expiry);
+          // Fetch user profile + persist session
+          const info = await fetchUserInfo(token);
+          if (info) {
+            setUserInfo(info);
+            storeEmail(info.email);
+            storeSession(token, expiry, info);
+          } else {
+            storeSession(token, expiry, null);
+          }
         });
         setReady(true);
-        // Attempt silent sign-in using stored email as hint (avoids showing
-        // the account picker if the user previously granted consent)
-        // 'none' = true silent auth (no popup). If it fails, user sees login page.
-        silentTimeout = setTimeout(() => requestAccessToken('none', getStoredEmail()), 200);
       }
     }, 100);
-    return () => { clearInterval(poll); clearTimeout(silentTimeout); };
+    return () => clearInterval(poll);
   }, []);
 
   const signIn = useCallback(() => {
@@ -45,7 +77,7 @@ export function useAuth() {
     setAccessToken(null);
     setExpiresAt(null);
     setUserInfo(null);
-    clearStoredEmail();
+    clearSession();
   }, [accessToken]);
 
   const getToken = useCallback(() => {
