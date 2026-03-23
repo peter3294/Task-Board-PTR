@@ -244,7 +244,10 @@ export default function TaskBoard({
   const handleAddTask    = useCallback(async () => { await addTask(null); }, [addTask]);
   const handleAddSubtask = useCallback(async (parentId) => { await addTask(parentId); }, [addTask]);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // Drag-drop only works when no column sort is active (sortKey === null)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: sortKey ? 99999 : 5 } })
+  );
 
   const handleDragEnd = useCallback((event) => {
     const { active, over } = event;
@@ -401,6 +404,20 @@ export default function TaskBoard({
                 className="text-xs text-av-teal hover:text-av-blue transition-colors ml-1"
               >
                 Clear filters
+              </button>
+            )}
+
+            {sortKey && (
+              <button
+                onClick={() => { setSortKey(null); setSortDir('asc'); }}
+                className="flex items-center gap-1 text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded px-2 py-1 hover:bg-orange-100 transition-colors"
+                title="Clear sort to re-enable drag & drop"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Sorted by {sortKey === 'actionDate' ? 'Date' : sortKey === 'item' ? 'Item' : sortKey === 'status' ? 'Status' : 'Link'}
+                — click to clear &amp; enable drag
               </button>
             )}
 
