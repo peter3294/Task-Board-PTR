@@ -41,18 +41,6 @@ export default function App() {
     if (isAuthenticated) loadQuotes();
   }, [isAuthenticated, loadQuotes]);
 
-  // ⌘K shortcut for search
-  useEffect(() => {
-    const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent('open-search'));
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
   if (!isAuthenticated) {
     return <LoginPage onSignIn={signIn} ready={ready} signingIn={signingIn} />;
   }

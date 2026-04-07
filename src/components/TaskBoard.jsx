@@ -12,7 +12,6 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import TaskRow from './TaskRow';
-import SearchModal from './SearchModal';
 import ArchiveView from './ArchiveView';
 import CalendarPanel from './CalendarPanel';
 import QuoteTicker from './QuoteTicker';
@@ -90,14 +89,14 @@ function matchesDateFilter(t, filter, today, endOfToday, endOfWeek, end14Days) {
   return false;
 }
 
-function applyFilters(tasks, filterStatuses, filterDates) {
+function applyFilters(tasks, filterStatuses, filterDates, filterText) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const endOfToday = new Date(today); endOfToday.setHours(23, 59, 59, 999);
   const endOfWeek  = new Date(today); endOfWeek.setDate(today.getDate() + 7);
   const end14Days  = new Date(today); end14Days.setDate(today.getDate() + 14);
 
-  return tasks.filter(t => {
+  let result = tasks.filter(t => {
     // Status filter (multi-select, empty = all)
     if (filterStatuses.length > 0 && !filterStatuses.includes(t.status)) return false;
     // Date filter (multi-select OR logic, empty = all)
@@ -107,6 +106,26 @@ function applyFilters(tasks, filterStatuses, filterDates) {
     }
     return true;
   });
+
+  // Text filter — match on item name, and pull in parent/children for context
+  const q = (filterText || '').trim().toLowerCase();
+  if (q) {
+    const matchIds = new Set();
+    result.forEach(t => {
+      if (t.item.toLowerCase().includes(q)) matchIds.add(t.id);
+    });
+    // Include parent of any matching subtask
+    result.forEach(t => {
+      if (matchIds.has(t.id) && t.parentId) matchIds.add(t.parentId);
+    });
+    // Include all children of any matching parent
+    result.forEach(t => {
+      if (t.parentId && matchIds.has(t.parentId)) matchIds.add(t.id);
+    });
+    result = result.filter(t => matchIds.has(t.id));
+  }
+
+  return result;
 }
 
 // ── sub-components ────────────────────────────────────────────────────────────
@@ -212,34 +231,46 @@ export default function TaskBoard({
   userInfo,
   onSignOut,
 }) {
-  // null = manual order (drag-sortable); clicking a header cycles asc → desc → null
+  // null = manual order (drag-sortable); clicking a header freezes that sort into drag order
   const [sortKey, setSortKey]           = useState(null);
   const [sortDir, setSortDir]           = useState('asc');
   const [filterStatuses, setFilterStatuses] = useState([]);
   const [filterDates,    setFilterDates]    = useState([]);
-  const [showSearch,  setShowSearch]  = useState(false);
+  const [filterText,     setFilterText]     = useState('');
   const [showArchive, setShowArchive] = useState(false);
+  const sortingRef = useRef(false);
 
-  useEffect(() => {
-    const handler = () => setShowSearch(true);
-    window.addEventListener('open-search', handler);
-    return () => window.removeEventListener('open-search', handler);
-  }, []);
+  // Freeze sort: clicking a header rewrites Order values in the Sheet, then clears the sort
+  const handleSort = useCallback(async (key) => {
+    if (sortingRef.current) return;
+    const dir = (sortKey === key && sortDir === 'asc') ? 'desc' : 'asc';
+    sortingRef.current = true;
+    try {
+      // Build sorted tree from currently filtered tasks
+      const currentFiltered = applyFilters(tasks, filterStatuses, filterDates, filterText);
+      const sorted = sortNodes(buildTree(currentFiltered), key, dir);
 
-  const handleSort = (key) => {
-    if (sortKey === key) {
-      if (sortDir === 'asc') {
-        setSortDir('desc');
-      } else {
-        // Third click — clear sort back to manual drag order
-        setSortKey(null);
-        setSortDir('asc');
+      // Persist parent order — look up full task objects (with rowIndex) from props
+      const taskMap = {};
+      tasks.forEach(t => { taskMap[t.id] = t; });
+      const sortedRoots = sorted.map(n => taskMap[n.id]).filter(Boolean);
+      if (sortedRoots.length > 1) await reorderTasks(sortedRoots);
+
+      // Persist children order within each parent
+      for (const node of sorted) {
+        if (node.children && node.children.length > 1) {
+          const sortedKids = node.children.map(c => taskMap[c.id]).filter(Boolean);
+          await reorderTasks(sortedKids);
+        }
       }
-    } else {
-      setSortKey(key);
+    } catch (e) {
+      // reorderTasks handles its own errors
+    } finally {
+      setSortKey(null);
       setSortDir('asc');
+      sortingRef.current = false;
     }
-  };
+  }, [tasks, filterStatuses, filterDates, filterText, sortKey, sortDir, reorderTasks]);
 
   const handleAddTask    = useCallback(async () => { await addTask(null); }, [addTask]);
   const handleAddSubtask = useCallback(async (parentId) => { await addTask(parentId); }, [addTask]);
@@ -271,9 +302,9 @@ export default function TaskBoard({
     reorderTasks(reordered);
   }, [tasks, reorderTasks]);
 
-  const filtered = applyFilters(tasks, filterStatuses, filterDates);
+  const filtered = applyFilters(tasks, filterStatuses, filterDates, filterText);
   const tree = sortNodes(buildTree(filtered), sortKey, sortDir);
-  const activeFilters = filterStatuses.length + filterDates.length;
+  const activeFilters = filterStatuses.length + filterDates.length + (filterText.trim() ? 1 : 0);
 
   const thBase = 'px-3 py-2.5 text-left text-xs font-medium text-av-blue uppercase tracking-wide select-none whitespace-nowrap bg-av-bg-blue';
 
@@ -305,18 +336,6 @@ export default function TaskBoard({
           </div>
           <h1 className="text-sm font-semibold text-white tracking-wide">Task Board</h1>
         </div>
-
-        <button
-          onClick={() => setShowSearch(true)}
-          className="flex items-center gap-1.5 text-sm text-white/80 hover:text-white border border-white/25 hover:border-white/50 rounded-md px-3 py-1.5 transition-colors"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          Search
-          <kbd className="ml-1 text-xs text-white/40 font-mono">⌘K</kbd>
-        </button>
 
         <button
           onClick={() => setShowArchive(true)}
@@ -398,26 +417,35 @@ export default function TaskBoard({
               />
             </div>
 
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-gray-500">Search</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={filterText}
+                  onChange={e => setFilterText(e.target.value)}
+                  placeholder="Search items..."
+                  className="text-xs border border-gray-200 rounded px-2 py-1 pr-6 w-44 bg-white text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-av-teal focus:border-av-teal"
+                />
+                {filterText && (
+                  <button
+                    onClick={() => setFilterText('')}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
+
             {activeFilters > 0 && (
               <button
-                onClick={() => { setFilterStatuses([]); setFilterDates([]); }}
+                onClick={() => { setFilterStatuses([]); setFilterDates([]); setFilterText(''); }}
                 className="text-xs text-av-teal hover:text-av-blue transition-colors ml-1"
               >
                 Clear filters
-              </button>
-            )}
-
-            {sortKey && (
-              <button
-                onClick={() => { setSortKey(null); setSortDir('asc'); }}
-                className="flex items-center gap-1 text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded px-2 py-1 hover:bg-orange-100 transition-colors"
-                title="Clear sort to re-enable drag & drop"
-              >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                Sorted by {sortKey === 'actionDate' ? 'Date' : sortKey === 'item' ? 'Item' : sortKey === 'status' ? 'Status' : 'Link'}
-                — click to clear &amp; enable drag
               </button>
             )}
 
@@ -497,13 +525,6 @@ export default function TaskBoard({
       </div>
 
       {/* Modals */}
-      {showSearch && (
-        <SearchModal
-          allTasks={allTasks}
-          onClose={() => setShowSearch(false)}
-        />
-      )}
-
       {showArchive && (
         <ArchiveView
           archivedTasks={archivedTasks}
