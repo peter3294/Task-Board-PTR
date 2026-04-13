@@ -572,10 +572,10 @@ export default function TaskBoard({
             </span>
           </div>
 
-          {/* Scrollable table — overflow-auto here is the scroll container for sticky headers */}
-          <div className="flex-1 overflow-auto">
+          {/* Scrollable table — overflow-auto enables both vertical (sticky headers) and horizontal scroll */}
+          <div className="flex-1 overflow-auto" style={{ overflowX: 'auto' }}>
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-              <table className="w-full" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
+              <table className="w-full" style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: '750px' }}>
                 <thead>
                   <tr>
                     <ColHeader colKey="item" label="Item" />
