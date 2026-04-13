@@ -12,8 +12,8 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import TaskRow from './TaskRow';
+import TaskDetail from './TaskDetail';
 import ArchiveView from './ArchiveView';
-import CalendarPanel from './CalendarPanel';
 import QuoteTicker from './QuoteTicker';
 
 const STATUS_ORDER = {
@@ -212,6 +212,68 @@ function MultiFilter({ selected, onChange, options, renderLabel }) {
   );
 }
 
+function ParentPickerModal({ tasks, excludeId, onPick, onClose }) {
+  const [search, setSearch] = useState('');
+  const ref = useRef();
+  const inputRef = useRef();
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  // Show only root tasks, excluding the task being converted and its children
+  const excludeIds = new Set();
+  const collectDescendants = (id) => {
+    excludeIds.add(id);
+    tasks.filter(t => t.parentId === id).forEach(t => collectDescendants(t.id));
+  };
+  collectDescendants(excludeId);
+
+  const candidates = tasks
+    .filter(t => !t.parentId && !excludeIds.has(t.id))
+    .filter(t => !search || t.item.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-start justify-center pt-24">
+      <div ref={ref} className="bg-white rounded-lg shadow-xl border border-gray-200 w-full max-w-md mx-4">
+        <div className="p-4 border-b border-gray-100">
+          <h3 className="text-sm font-medium text-gray-900 mb-2">Select parent task</h3>
+          <input
+            ref={inputRef}
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search tasks..."
+            className="w-full text-sm border border-gray-200 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-av-teal"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto">
+          {candidates.length === 0 && (
+            <div className="px-4 py-6 text-sm text-gray-400 text-center">No matching tasks</div>
+          )}
+          {candidates.map(t => (
+            <button
+              key={t.id}
+              onClick={() => onPick(t.id)}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-800 hover:bg-av-bg-teal transition-colors border-b border-gray-50 last:border-0"
+            >
+              {t.item || 'Untitled'}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
 export default function TaskBoard({
@@ -227,7 +289,6 @@ export default function TaskBoard({
   unarchiveTask,
   deleteTask,
   quotes,
-  getToken,
   userInfo,
   onSignOut,
 }) {
@@ -238,7 +299,52 @@ export default function TaskBoard({
   const [filterDates,    setFilterDates]    = useState([]);
   const [filterText,     setFilterText]     = useState('');
   const [showArchive, setShowArchive] = useState(false);
+  const [notesTaskId, setNotesTaskId] = useState(null);
+  const [sidebarWidth, setSidebarWidth] = useState(400);
+  const [convertingTaskId, setConvertingTaskId] = useState(null);
   const sortingRef = useRef(false);
+  const resizingRef = useRef(null);
+
+  // ── Sidebar resize logic ──────────────────────────────────────────────────
+  const startResize = useCallback((e) => {
+    e.preventDefault();
+    resizingRef.current = { startX: e.clientX, startWidth: sidebarWidth };
+    const onMouseMove = (e) => {
+      if (!resizingRef.current) return;
+      const diff = resizingRef.current.startX - e.clientX;
+      const newWidth = Math.max(250, Math.min(window.innerWidth * 0.5, resizingRef.current.startWidth + diff));
+      setSidebarWidth(newWidth);
+    };
+    const onMouseUp = () => {
+      resizingRef.current = null;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [sidebarWidth]);
+
+  // ── Task ↔ Subtask conversion ─────────────────────────────────────────────
+  const handleConvert = useCallback((taskId, action) => {
+    if (action === 'promote') {
+      updateTask(taskId, { parentId: '' });
+    } else {
+      setConvertingTaskId(taskId);
+    }
+  }, [updateTask]);
+
+  const handlePickParent = useCallback((parentId) => {
+    if (convertingTaskId) {
+      updateTask(convertingTaskId, { parentId });
+    }
+    setConvertingTaskId(null);
+  }, [convertingTaskId, updateTask]);
+
+  const notesTask = notesTaskId ? allTasks.find(t => t.id === notesTaskId) : null;
 
   // Freeze sort: clicking a header rewrites Order values in the Sheet, then clears the sort
   const handleSort = useCallback(async (key) => {
@@ -385,7 +491,7 @@ export default function TaskBoard({
       <div className="flex flex-1 min-h-0">
 
         {/* Board area */}
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0">
           {error && (
             <div className="mx-4 mt-4 px-4 py-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700 flex-shrink-0">
               {error}
@@ -511,6 +617,9 @@ export default function TaskBoard({
                         onDelete={deleteTask}
                         onAddSubtask={handleAddSubtask}
                         onReorder={reorderTasks}
+                        onOpenNotes={setNotesTaskId}
+                        onConvert={handleConvert}
+                        activeNotesId={notesTaskId}
                       />
                     ))}
                   </SortableContext>
@@ -520,11 +629,37 @@ export default function TaskBoard({
           </div>
         </div>
 
-        {/* Calendar panel */}
-        <CalendarPanel getToken={getToken} />
+        {/* Notes sidebar */}
+        {notesTask && (
+          <>
+            <div
+              onMouseDown={startResize}
+              className="w-1.5 flex-shrink-0 cursor-col-resize bg-gray-200 hover:bg-av-teal/40 active:bg-av-teal/60 transition-colors"
+            />
+            <div
+              className="flex-shrink-0 bg-white border-l border-gray-200 flex flex-col overflow-hidden"
+              style={{ width: sidebarWidth }}
+            >
+              <TaskDetail
+                task={notesTask}
+                onUpdate={updateTask}
+                onClose={() => setNotesTaskId(null)}
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {/* Modals */}
+      {convertingTaskId && (
+        <ParentPickerModal
+          tasks={tasks}
+          excludeId={convertingTaskId}
+          onPick={handlePickParent}
+          onClose={() => setConvertingTaskId(null)}
+        />
+      )}
+
       {showArchive && (
         <ArchiveView
           archivedTasks={archivedTasks}

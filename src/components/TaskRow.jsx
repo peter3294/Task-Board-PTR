@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSortable, SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import TaskDetail from './TaskDetail';
 
 const STATUS_OPTIONS = ['Not Started', 'Working On It', 'Blocked', 'Done'];
 
@@ -71,8 +70,7 @@ function SubtaskDndWrapper({ items, onReorder, children }) {
   );
 }
 
-export default function TaskRow({ task, children = [], depth = 0, onUpdate, onArchive, onDelete, onAddSubtask, onReorder }) {
-  const [notesExpanded, setNotesExpanded]   = useState(false);
+export default function TaskRow({ task, children = [], depth = 0, onUpdate, onArchive, onDelete, onAddSubtask, onReorder, onOpenNotes, onConvert, activeNotesId }) {
   const [childrenOpen, setChildrenOpen]     = useState(false);
   const [editField, setEditField]           = useState(null);
   const [editValue, setEditValue]           = useState('');
@@ -162,9 +160,9 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
             )}
 
             {/* Notes indicator dot */}
-            {task.notes && !notesExpanded && (
+            {task.notes && activeNotesId !== task.id && (
               <button
-                onClick={() => setNotesExpanded(true)}
+                onClick={() => onOpenNotes?.(task.id)}
                 className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-blue-400 hover:bg-blue-600 ml-1 transition-colors"
                 title="View notes"
               />
@@ -238,11 +236,10 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
         {/* Actions */}
         <td className="py-1.5 pl-3 pr-4 whitespace-nowrap">
           <div className={`flex items-center gap-1 transition-opacity ${hovered ? 'opacity-100' : 'opacity-0'}`}>
-            {/* Notes toggle — always available */}
             <button
-              onClick={() => setNotesExpanded(v => !v)}
-              className={`text-xs px-1.5 py-0.5 rounded transition-colors ${notesExpanded ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}
-              title={notesExpanded ? 'Close notes' : 'Open notes'}
+              onClick={() => onOpenNotes?.(task.id)}
+              className={`text-xs px-1.5 py-0.5 rounded transition-colors ${activeNotesId === task.id ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}
+              title="Open notes in sidebar"
             >
               Notes
             </button>
@@ -250,6 +247,18 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
               className="text-xs text-gray-500 hover:text-gray-800 px-1.5 py-0.5 rounded hover:bg-gray-100 transition-colors" title="Add subtask">
               + Sub
             </button>
+            {/* Convert: Make Sub (for root tasks) or Promote (for subtasks) */}
+            {!task.parentId ? (
+              <button onClick={() => onConvert?.(task.id, 'demote')}
+                className="text-xs text-gray-400 hover:text-purple-600 px-1.5 py-0.5 rounded hover:bg-purple-50 transition-colors" title="Convert to subtask">
+                Make Sub
+              </button>
+            ) : (
+              <button onClick={() => onConvert?.(task.id, 'promote')}
+                className="text-xs text-gray-400 hover:text-purple-600 px-1.5 py-0.5 rounded hover:bg-purple-50 transition-colors" title="Promote to parent task">
+                Promote
+              </button>
+            )}
             <button onClick={() => onArchive(task.id)}
               className="text-xs text-gray-400 hover:text-orange-600 px-1.5 py-0.5 rounded hover:bg-orange-50 transition-colors" title="Archive">
               Archive
@@ -261,15 +270,6 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
           </div>
         </td>
       </tr>
-
-      {/* Notes panel */}
-      {notesExpanded && (
-        <tr>
-          <td colSpan={5} className="p-0 bg-blue-50/30">
-            <TaskDetail task={task} onUpdate={onUpdate} />
-          </td>
-        </tr>
-      )}
 
       {/* Subtasks — own DndContext so drags don't conflict with root task sorting */}
       {childrenOpen && children.length > 0 && (
@@ -285,6 +285,9 @@ export default function TaskRow({ task, children = [], depth = 0, onUpdate, onAr
               onDelete={onDelete}
               onAddSubtask={onAddSubtask}
               onReorder={onReorder}
+              onOpenNotes={onOpenNotes}
+              onConvert={onConvert}
+              activeNotesId={activeNotesId}
             />
           ))}
         </SubtaskDndWrapper>

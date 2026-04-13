@@ -59,7 +59,6 @@ export default function App() {
       unarchiveTask={unarchiveTask}
       deleteTask={deleteTask}
       quotes={quotes}
-      getToken={getToken}
       userInfo={userInfo}
       onSignOut={signOut}
     />
